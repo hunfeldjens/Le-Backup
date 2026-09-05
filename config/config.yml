@@ -1,0 +1,126 @@
+# Le-Backup Manager – neutrale Beispielkonfiguration
+# Alle Namen, Pfade und Ziele sind Platzhalter. Vor dem Einsatz anpassen.
+# Lokale Pfade sind absolut oder relativ zum Ordner von create-backup.sh.
+
+general_settings:
+  backup_directory: /var/backups/backup-manager
+  log_directory: /var/log/backup-manager
+  write_logs: true
+
+  # Bei längeren Schritten regelmäßig den Status melden. 0 schaltet diese Meldungen aus.
+  progress_interval_seconds: 30
+
+  # Für einzelne Jobs können Archivmethode und Anzahl unten überschrieben werden.
+  # Möglich: zip, tar, tar.gz, tar.bz2, tar.zst.
+  archiving_method: tar.zst
+  max_backups: 10
+
+  # Mindestfreiplatz vor jedem Backup, in MB. 0 schaltet diese Prüfung aus.
+  minimum_free_mb: 1024
+
+  # tmux oder screen. Der ausgewählte Multiplexer muss installiert sein.
+  multiplexer: tmux
+  session_name: backup-manager
+  continue_on_error: true
+
+# Alle fertigen Archive werden mit age verschlüsselt. Die Datei enthält nur öffentliche Schlüssel.
+encryption:
+  recipient_file: age-recipients.txt
+
+# Gemeinsame Verbindung für alle Jobs. Schlüssel und Logindaten bleiben in secrets/.
+rsync:
+  credentials_file: rsync.yml
+  dry_run: false
+  timeout_seconds: 300
+
+# Nur mit --full-server. tar.zst mit Zstd Ultra 22 und feste Ausschlüsse sind nicht änderbar.
+full_server_backup:
+  max_backups: 2
+  rsync:
+    enabled: false
+    destination: Examples/FullServer
+    keep_backups: 3
+    delete_local_after_transfer: false
+
+# Jeder name ist frei wählbar und zugleich ein Startparameter: -JOBNAME.
+# enabled: false deaktiviert einen Job. Mehrere Namen können zusammen gestartet werden.
+# Dateien werden im laufenden Betrieb kopiert; Anwendungen bleiben unangetastet.
+# rsync.enabled schaltet die Übertragung pro Job ein oder aus.
+# keep_backups zählt Archive auf dem Storage-Server; max_backups zählt lokale Archive.
+# delete_local_after_transfer: true entfernt übertragene Archive nach geprüftem Erfolg lokal.
+jobs:
+  - name: ApplicationData
+    type: files
+    enabled: false
+    source: /srv/example/application-data
+    exclude: []
+    rsync:
+      enabled: false
+      destination: Examples/ApplicationData
+      keep_backups: 5
+      delete_local_after_transfer: false
+
+  - name: ConfigurationData
+    type: files
+    enabled: false
+    source: /srv/example/configuration
+    exclude: []
+    rsync:
+      enabled: false
+      destination: Examples/ConfigurationData
+      keep_backups: 30
+      delete_local_after_transfer: false
+
+  - name: WebData
+    type: files
+    enabled: false
+    source: /srv/example/web-data
+    exclude: []
+    rsync:
+      enabled: false
+      destination: Examples/WebData
+      keep_backups: 30
+      delete_local_after_transfer: false
+
+  - name: MySQL
+    type: mysql
+    enabled: false
+    credentials_file: mysql.cnf
+
+    # Für MariaDB ist mariadb-dump möglich. Im Container muss der Befehl dort vorhanden sein.
+    dump_command: mysqldump
+    container: ''
+
+    # InnoDB-Dump ohne Serverstopp. lock-all-tables kann dagegen Schreibzugriffe blockieren.
+    consistency: single-transaction
+
+    # [] sichert alle Datenbanken. Alternativ: [datenbank_1, datenbank_2].
+    databases: []
+    rsync:
+      enabled: false
+      destination: Examples/Database
+      keep_backups: 130
+      delete_local_after_transfer: false
+
+  - name: Docker
+    type: docker
+    enabled: false
+
+    # Tatsächliche Containernamen eintragen und anschließend den Job aktivieren.
+    containers:
+      - nginx
+
+    # Zum Beispiel: [/docker/apache/compose.yml, /docker/apache/.env].
+    compose_files: []
+
+    # Nutzdaten sichern. Laufende MariaDB-Daten stattdessen als mysql-Job dumpen.
+    include_mounts: true
+
+    # Neu installierbare Images und Container-Dateisysteme standardmäßig weglassen.
+    export_filesystem: false
+    save_images: false
+    rsync:
+      enabled: false
+      destination: Examples/Docker
+      keep_backups: 30
+      delete_local_after_transfer: false

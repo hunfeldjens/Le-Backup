@@ -1,0 +1,304 @@
+# Native Software: Jeder Eintrag ist ein eigener Job, z.B. -Nginx oder -WireGuard.
+# Alle Einträge sind zunächst deaktiviert. Nur tatsächlich verwendete Software aktivieren.
+# paths müssen vorhanden sein. Fehlende optional_paths werden mit einem Hinweis übersprungen.
+# Typische Linux-Pfade sind vorbelegt; abweichende Installationen bitte anpassen.
+# Es werden nur Dateien kopiert. Dienste werden niemals gestoppt oder neu geladen.
+
+software:
+  # Webserver, Reverse-Proxys und Zertifikate
+  - name: Nginx
+    enabled: false
+    paths:
+      - /etc/nginx
+    optional_paths:
+      - /etc/default/nginx
+
+  - name: Apache
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/apache2
+      - /etc/httpd
+
+  - name: Fail2Ban
+    enabled: false
+    paths:
+      - /etc/fail2ban
+    optional_paths:
+      - /etc/default/fail2ban
+
+  # Enthält auch private VPN-Schlüssel: Backups entsprechend vertraulich behandeln.
+
+  - name: OpenSSH
+    enabled: false
+    paths:
+      - /etc/ssh
+    optional_paths: []
+
+  - name: Certbot
+    enabled: false
+    paths:
+      - /etc/letsencrypt
+    optional_paths:
+      - /etc/default/certbot
+
+  - name: HAProxy
+    enabled: false
+    paths:
+      - /etc/haproxy
+    optional_paths:
+      - /etc/default/haproxy
+
+  - name: Traefik
+    enabled: false
+    paths:
+      - /etc/traefik
+    optional_paths: []
+
+  - name: Caddy
+    enabled: false
+    paths:
+      - /etc/caddy
+    optional_paths:
+      - /var/lib/caddy
+
+  - name: PHP-FPM
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/php
+      - /etc/php.ini
+      - /etc/php.d
+      - /etc/php-fpm.conf
+      - /etc/php-fpm.d
+
+  # Schutz, Firewall und VPN
+  - name: WireGuard
+    enabled: false
+    paths:
+      - /etc/wireguard
+    optional_paths:
+      - /etc/sysctl.d
+
+  - name: CrowdSec
+    enabled: false
+    paths:
+      - /etc/crowdsec
+    optional_paths: []
+
+  - name: OpenVPN
+    enabled: false
+    paths:
+      - /etc/openvpn
+    optional_paths: []
+
+  - name: Tailscale-Config
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/default/tailscaled
+      - /etc/tailscale
+
+  - name: UFW
+    enabled: false
+    paths:
+      - /etc/ufw
+    optional_paths:
+      - /etc/default/ufw
+
+  - name: Nftables
+    enabled: false
+    paths:
+      - /etc/nftables.conf
+    optional_paths:
+      - /etc/nftables.d
+
+  - name: Iptables-Persistent
+    enabled: false
+    paths:
+      - /etc/iptables
+    optional_paths:
+      - /etc/default/netfilter-persistent
+
+
+  # Datenbank-/Cache-Einstellungen, ausdrücklich ohne laufende Datenverzeichnisse.
+  - name: Redis-Config
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/redis
+      - /etc/redis.conf
+
+  - name: Valkey-Config
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/valkey
+      - /etc/valkey.conf
+
+  - name: PostgreSQL-Config
+    enabled: false
+    paths:
+      - /etc/postgresql
+    optional_paths:
+      - /etc/postgresql-common
+
+  - name: MongoDB-Config
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/mongod.conf
+      - /etc/mongodb.conf
+      - /etc/mongos.conf
+
+  - name: RabbitMQ-Config
+    enabled: false
+    paths:
+      - /etc/rabbitmq
+    optional_paths: []
+
+  # Monitoring, Alarmierung und Protokollierung
+  - name: Prometheus
+    enabled: false
+    paths:
+      - /etc/prometheus
+    optional_paths:
+      - /etc/default/prometheus
+
+  - name: Alertmanager
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/alertmanager
+      - /etc/prometheus/alertmanager.yml
+      - /etc/default/prometheus-alertmanager
+
+  - name: Node-Exporter
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/default/prometheus-node-exporter
+      - /etc/node_exporter
+
+  # Erfasst Config und Provisioning, nicht die laufende Grafana-SQLite-Datenbank.
+  - name: Grafana
+    enabled: false
+    paths:
+      - /etc/grafana
+    optional_paths:
+      - /etc/default/grafana-server
+
+  - name: Grafana-Alloy
+    enabled: false
+    paths:
+      - /etc/alloy
+    optional_paths:
+      - /etc/default/alloy
+
+  - name: Loki
+    enabled: false
+    paths:
+      - /etc/loki
+    optional_paths: []
+
+  - name: Rsyslog
+    enabled: false
+    paths:
+      - /etc/rsyslog.conf
+    optional_paths:
+      - /etc/rsyslog.d
+
+  - name: Logrotate
+    enabled: false
+    paths:
+      - /etc/logrotate.conf
+    optional_paths:
+      - /etc/logrotate.d
+
+  # Zeitpläne, Daemon-Konfiguration und grundlegende Linux-Einstellungen
+
+  - name: Cron
+    enabled: false
+    paths:
+      - /etc/crontab
+    optional_paths:
+      - /etc/cron.d
+      - /etc/cron.daily
+      - /etc/cron.hourly
+      - /etc/cron.weekly
+      - /etc/cron.monthly
+      - /var/spool/cron
+
+  - name: Systemd
+    enabled: false
+    paths:
+      - /etc/systemd/system
+    optional_paths:
+      - /etc/systemd/user
+
+  - name: Docker-Daemon-Config
+    enabled: false
+    paths:
+      - /etc/docker
+    optional_paths:
+      - /etc/default/docker
+
+  - name: Supervisor
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/supervisor
+      - /etc/supervisord.conf
+      - /etc/supervisord.d
+
+  - name: Linux-Netzwerk
+    enabled: false
+    paths:
+      - /etc/hosts
+      - /etc/hostname
+    optional_paths:
+      - /etc/netplan
+      - /etc/network
+      - /etc/systemd/network
+      - /etc/systemd/resolved.conf
+      - /etc/systemd/resolved.conf.d
+
+  - name: Linux-Limits
+    enabled: false
+    paths:
+      - /etc/security/limits.conf
+    optional_paths:
+      - /etc/security/limits.d
+      - /etc/sysctl.conf
+      - /etc/sysctl.d
+
+  - name: Chrony
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/chrony
+      - /etc/chrony.conf
+
+  - name: Postfix
+    enabled: false
+    paths:
+      - /etc/postfix
+    optional_paths:
+      - /etc/aliases
+
+  - name: Bind-DNS
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/bind
+      - /etc/named.conf
+      - /etc/named
+
+  # Nur Servereinstellungen; die eigentlichen Daten weiterhin per mysql-Job dumpen.
+  - name: MariaDB-Config
+    enabled: false
+    paths: []
+    optional_paths:
+      - /etc/mysql
+      - /etc/my.cnf
+      - /etc/my.cnf.d
