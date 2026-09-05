@@ -4,9 +4,6 @@
 
 Diese Anleitung beschreibt die Verschlüsselungs-, Datenbank- und SSH-Dateien, die Le-Backup Manager für verschlüsselte Backups und optionale Rsync-Übertragungen benötigt.
 
-> [!WARNING]
-> Echte Passwörter, private Schlüssel und produktive Hosts dürfen niemals in Git eingecheckt werden. Im Repository gehören ausschließlich die mitgelieferten `.example`-Dateien.
-
 > [!IMPORTANT]
 > Der Ordner `secrets/` gehört root. Unterordner erhalten Modus `700`, Dateien Modus `600`. Root, sudo-Berechtigte und vergleichbar privilegierte Prozesse können durch Dateirechte nicht ausgesperrt werden. Auch verschlüsselte Archive können sensible Metadaten oder gesicherte Zugangsdaten enthalten und müssen privat behandelt werden.
 
