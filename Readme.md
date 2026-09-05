@@ -1,74 +1,206 @@
-# Verschlüsselung und Zugangsdaten
+# Le-Backup Manager
 
-Dieser Ordner gehört root. Unterordner erhalten `700`, Dateien `600`; normale Benutzer haben damit keinen Zugriff. Root, sudo-Berechtigte und vergleichbar privilegierte Prozesse können durch diese Rechte nicht ausgesperrt werden. Auch fertige Archive können Passwörter enthalten und müssen privat bleiben. Sämtliche Namen, Hosts, Ports und Pfade in dieser Anleitung sind neutrale Beispiele und dürfen nicht als produktive Zugangsdaten übernommen werden.
+> Ein modularer Backup-Manager für Linux-Server mit verschlüsselten Datei-, Datenbank-, Docker- und System-Backups.
 
-`age-recipients.txt` enthält ausschließlich öffentliche Empfängerschlüssel für die Backup-Verschlüsselung. `mysql.cnf` enthält die SQL-Anmeldung. `rsync.yml` enthält den Storage-Host und die SSH-Anmeldung. Private SSH-Schlüssel, Passwortdateien und `known_hosts` liegen ebenfalls hier. Echte Secrets sind über Git-Ignore ausgeschlossen; bereits früher erfasste Dateien werden dadurch nicht nachträglich aus Git entfernt.
+Le-Backup Manager erstellt reproduzierbare Backups über konfigurierbare Jobs. Archive werden geprüft, mit [`age`](https://github.com/FiloSottile/age) verschlüsselt und optional per Rsync auf einen entfernten Storage übertragen. Anwendungen und Container bleiben während des gesamten Ablaufs aktiv: Das Programm beendet, pausiert oder startet keine Dienste.
 
-## Backup-Schlüssel für age
+## Funktionen auf einen Blick
 
-Der `age`-Schlüssel ist unabhängig von einem SSH-Schlüssel. Er verschlüsselt die Backup-Archive und wird nicht zur Anmeldung am Storage-Server verwendet.
+| Bereich | Unterstützung |
+| --- | --- |
+| Dateien und Verzeichnisse | Frei definierbare Quellen, Ausschlussmuster und Aufbewahrung |
+| MySQL und MariaDB | Konsistente SQL-Dumps, lokal oder aus einem Docker-Container |
+| Docker | Compose-Dateien, Container-Metadaten, Volumes und Bind-Mounts |
+| Linux-Konfiguration | Einzelne Jobs für Webserver, SSH, Firewall, VPN, Monitoring und weitere Dienste |
+| Gesamtsicherung | Manuelles Root-Dateisystem-Backup als stark komprimiertes `tar.zst`-Archiv |
+| Verschlüsselung | Verpflichtende Public-Key-Verschlüsselung mit einem oder mehreren `age`-Empfängern |
+| Remote-Storage | Rsync über SSH, strikte Hostschlüsselprüfung und Prüfsummenvergleich |
+| Automatisierung | Ausführung im Vordergrund, in tmux/screen oder über die Root-Crontab |
+| Sicherheit | Private Arbeitsordner, restriktive Rechte, Laufsperre und keine Secrets in Prozessargumenten |
 
-### 1. Schlüsselpaar auf einem sicheren Rechner erzeugen
+## So funktioniert ein Backup-Lauf
 
-`age` auf einem vertrauenswürdigen Rechner installieren und dort ausführen:
+1. Config, Programme, Quellen und Secret-Dateien werden vorab geprüft.
+2. Der ausgewählte Job liest die konfigurierten Daten, ohne den Dienstlebenszyklus zu verändern.
+3. Die Daten werden in einem privaten Arbeitsordner archiviert und auf Lesbarkeit geprüft.
+4. Das fertige Archiv wird mit den öffentlichen `age`-Empfängern verschlüsselt.
+5. Eine `.meta.json` speichert Größe, Format, Abschlusszeit und SHA-256-Prüfsumme.
+6. Bei aktiviertem Rsync folgen Upload und ein zweiter Vergleich mit `--checksum`.
+7. Erst nach erfolgreicher Prüfung greifen Remote-Aufbewahrung und optionales lokales Löschen.
+
+> [!IMPORTANT]
+> Alle mitgelieferten Namen, Pfade, Hosts, Ports und Zielordner sind neutrale Beispiele. Sämtliche Jobs sind standardmäßig deaktiviert und müssen vor dem ersten Lauf bewusst an die eigene Umgebung angepasst werden.
+
+> [!CAUTION]
+> Der private `age`-Schlüssel gehört nicht auf den Backup- oder Storage-Server. Ohne eine getrennt verwahrte Kopie dieses Schlüssels können verschlüsselte Archive nicht wiederhergestellt werden.
+
+## Dokumentation
+
+| Dokument | Inhalt |
+| --- | --- |
+| [Installation](installation.md) | Voraussetzungen, Installation, Rechte, Cron, Update und Entfernung |
+| [Secrets und Verschlüsselung](secrets/Readme.md) | `age`, MariaDB-Zugang, SSH, `known_hosts` und Rsync-Anmeldung |
+| [`config/config.yml`](config/config.yml) | Neutrale Vorlage für Datei-, SQL-, Docker- und Full-Server-Jobs |
+| [`config/software.yml`](config/software.yml) | Optionale Vorlagen für native Linux-Dienste |
+
+## Schnellstart
+
+### 1. Voraussetzungen prüfen
 
 ```bash
-umask 077
-age-keygen -o le-backup-identity.txt
-age-keygen -y le-backup-identity.txt > age-recipients.txt
-chmod 600 le-backup-identity.txt age-recipients.txt
+sudo bash install.sh check
 ```
 
-`le-backup-identity.txt` ist der private Schlüssel. Er darf weder auf den Backup-Server noch auf den Storage-Server kopiert werden. Mindestens zwei getrennte Offline-Kopien anlegen und anschließend eine Probeentschlüsselung durchführen. Geht dieser Schlüssel verloren, können die Backups nicht wiederhergestellt werden.
+### 2. Vorlagen anpassen
 
-`age-recipients.txt` enthält nur den öffentlichen Schlüssel und darf zum Backup-System kopiert werden. Mehrere öffentliche Schlüssel können jeweils in einer eigenen Zeile stehen; jeder zugehörige private Schlüssel kann das Archiv unabhängig entschlüsseln. Das eignet sich beispielsweise für zwei getrennt verwahrte Wiederherstellungsschlüssel.
+- Jobs in `config/config.yml` konfigurieren und gezielt aktivieren.
+- Optional benötigte Dienste in `config/software.yml` aktivieren.
+- Öffentliche `age`-Empfänger und benötigte Zugangsdaten unter `secrets/` einrichten.
 
-### 2. Öffentlichen Schlüssel hinterlegen
-
-Bei einer bestehenden Installation den öffentlichen Schlüssel direkt in deren Secret-Ordner installieren:
+### 3. Installieren
 
 ```bash
-sudo install -o root -g root -m 600 age-recipients.txt \
-  /opt/backup-manager/secrets/age-recipients.txt
-sudo chmod 700 /opt/backup-manager/secrets
+sudo bash install.sh install --target /opt/backup-manager
 ```
 
-Für spätere Neuinstallationen dieselbe öffentliche Datei zusätzlich im Quellordner unter `secrets/age-recipients.txt` ablegen. Der private Schlüssel bleibt außerhalb beider Ordner.
+### 4. Installation prüfen und starten
 
-In `config/config.yml` muss dieser relative Dateiname stehen:
+Als root im Ordner mit `create-backup.sh`:
+
+```bash
+cd /opt/backup-manager
+bash create-backup.sh --list
+bash create-backup.sh --check
+bash create-backup.sh --wait
+```
+
+Bei aktivierter Rsync-Übertragung muss vor dem ersten Lauf zusätzlich der SSH-Hostschlüssel geprüft und gespeichert werden:
+
+```bash
+bash create-backup.sh --setup-ssh-host
+```
+
+### Wichtige Befehle
+
+| Aufgabe | Befehl |
+| --- | --- |
+| Jobs anzeigen | `bash create-backup.sh --list` |
+| Konfiguration prüfen | `bash create-backup.sh --check` |
+| Alle aktiven Jobs starten | `bash create-backup.sh --wait` |
+| Bestimmten Job starten | `bash create-backup.sh --wait -ApplicationData` |
+| Mehrere Jobs starten | `bash create-backup.sh --wait -MySQL -Docker` |
+| Nur einen Jobtyp starten | `bash create-backup.sh --wait --type mysql` |
+| Nur vorhandene Archive übertragen | `bash create-backup.sh --wait --rsync-only -ApplicationData` |
+| Laufstatus anzeigen | `bash create-backup.sh --status` |
+| Gesamten Root-Server sichern | `bash create-backup.sh --wait --full-server` |
+
+Jeder Job ist über seinen frei konfigurierten `name` auswählbar. Groß-/Kleinschreibung wird bei der Auswahl ignoriert. Namen bestehen aus Buchstaben, Zahlen, `_` und `-`, ohne Leerzeichen.
+
+```bash
+bash create-backup.sh -ApplicationData
+bash create-backup.sh -MySQL -Docker
+bash create-backup.sh --type mysql
+bash create-backup.sh --rsync-only -ApplicationData
+```
+
+`ApplicationData`, `MySQL` und `Docker` sind neutrale Beispiele aus der Config, keine fest verdrahteten Auswahlmöglichkeiten. Mit jedem weiteren Jobnamen entsteht automatisch ein weiterer Auswahlparameter.
+
+`--foreground` führt das Backup direkt aus. `--wait` startet im gewählten Multiplexer und wartet auf das Ergebnis. Ohne diese Optionen bestätigt der Aufruf nur den Start der Hintergrundsession. Das Ergebnis steht anschließend unter `state/latest.json` und ist über `--status` abrufbar. Ein erfolgreicher direkter/wartender Lauf liefert Exitcode `0`, ein Fehler einen anderen Code; `75` bedeutet, dass die Laufsperre bereits belegt ist.
+
+Die beim Start ausgegebene Anweisung öffnet die laufende Session. Mit `Strg+B`, danach `D` lässt sich tmux verlassen, ohne das Backup abzubrechen; bei Screen mit `Strg+A`, danach `D`. Die Session endet nach dem Backup. Pro Installation läuft höchstens ein Backup gleichzeitig.
+
+### Ohne tmux oder screen starten
+
+```bash
+bash create-backup.sh --foreground
+bash create-backup.sh --foreground -MySQL
+bash create-backup.sh --foreground --rsync-only
+```
+
+`--foreground` startet direkt im aktuellen Terminal und benötigt weder tmux noch screen. Jobauswahl, Protokolle und Fehlerprüfung bleiben gleich. Das Terminal bzw. die SSH-Verbindung während des Laufs geöffnet lassen; dieser Modus bietet keinen Schutz gegen einen Verbindungsabbruch. Ohne `--foreground` wird weiterhin der konfigurierte Multiplexer verwendet.
+
+### tmux-Session anzeigen und öffnen
+
+Das Backup verwendet einen eigenen tmux-Socket unter `state/tmux.sock`. Deshalb zeigen `tmux ls` und `tmux a -t backup-manager` ohne `-S` diese Backup-Session nicht an: Sie greifen auf den Standard-Socket zu.
+
+Als root die Backup-Sessions anzeigen:
+
+```bash
+tmux -S /opt/backup-manager/state/tmux.sock ls
+```
+
+Die laufende Backup-Session öffnen:
+
+```bash
+tmux -S /opt/backup-manager/state/tmux.sock attach -t backup-manager
+```
+
+Bei einem anderen Installationsordner den Pfad entsprechend anpassen. Der Sessionname `backup-manager` entspricht `general_settings.session_name` in `config/config.yml`. Beim Backup-Start wird der passende Öffnen-Befehl mit dem tatsächlich verwendeten Pfad und Namen ausgegeben.
+
+Zum Verlassen ohne Abbruch `Strg+B` drücken, loslassen und danach `D` drücken. Keine Session mehr vorhanden? Der Backup-Prozess kann bereits erfolgreich oder mit einem Fehler beendet worden sein. Das letzte Ergebnis anzeigen:
+
+```bash
+bash /opt/backup-manager/create-backup.sh --status
+```
+
+### Status und Protokolle
+
+Meldungen tragen den Prefix `[Le-Backup]` und ein Level: `INFO`, `WARN`, `FEHLER` oder `AUSGABE` für sonstige Programmmeldungen. Angezeigt werden der aktuelle Job, Archivierung, SQL-Dump, Archivprüfung, Rsync-Upload, Remote-Vergleich und Aufbewahrung. Die normalen Dateilisten der Archivprogramme werden nicht ausgegeben. Warnungen und Fehlermeldungen bleiben sichtbar.
+
+Konsole und Log verwenden dasselbe Format, ohne Datum vor jeder Meldung. Das Datum steht im Logdateinamen:
+
+```text
+[Le-Backup] 19:50:07 : [INFO] Backup-Lauf gestartet.
+```
+
+Während längerer Schritte erscheint standardmäßig alle 30 Sekunden eine Meldung mit der bisherigen Laufzeit. `general_settings.progress_interval_seconds` ändert dieses Intervall; `0` schaltet die regelmäßigen Meldungen aus. Die Zähler zeigen abgeschlossene Jobs bzw. Übertragungen, keinen geschätzten Byte-Fortschritt.
+
+Mit `general_settings.write_logs: true` stehen die Laufmeldungen und Programmdiagnosen sowohl in der Konsole als auch in der Logdatei. Der Logpfad wird beim Start angezeigt. Fehler enthalten den betroffenen Job und Exitcode; bei Rsync zusätzlich den fehlgeschlagenen Schritt. Die Vorprüfung findet vor dem Anlegen des Laufprotokolls statt und meldet ihre Fehler direkt in der Startkonsole. Bei ausgeschaltetem Dateiprotokoll wird ausdrücklich darauf hingewiesen.
+
+`--status` funktioniert auch während eines laufenden Backups und zeigt Phase, aktuellen Job, Zähler und Logpfad als JSON. Für die laufenden Textausgaben die tmux-/screen-Session öffnen oder die angegebene Logdatei mit `tail -f` verfolgen.
+
+## Verschlüsselung
+
+Die Verschlüsselung ist für neue Backups verpflichtend und kann nicht pro Job ausgeschaltet werden. `config/config.yml` verweist lediglich auf eine Empfängerdatei unter `secrets/`:
 
 ```yaml
 encryption:
   recipient_file: age-recipients.txt
 ```
 
-Die Empfängerdatei ist trotz ihres öffentlichen Inhalts mit `600` geschützt. Dadurch können normale Benutzer keinen eigenen Empfänger ergänzen, mit dem sie zukünftige Backups entschlüsseln könnten.
+Diese Datei enthält einen oder mehrere öffentliche `age`-Schlüssel. Der private Schlüssel gehört nicht auf den Backup-Server oder Storage-Server, sondern in mindestens zwei getrennte, sichere Offline-Kopien. Ohne privaten Schlüssel können die Archive nicht wiederhergestellt werden. Die vollständige [Schlüsselanleitung](secrets/Readme.md) beschreibt Erzeugung, Einrichtung, Prüfung und Entschlüsselung.
 
-### 3. Einrichtung und Wiederherstellung prüfen
+Das normale Archiv wird zuerst in einem privaten Arbeitsordner erstellt und geprüft. Danach verschlüsselt `age` es; nur die fertige `.age`-Datei wird in den Backup-Ordner verschoben und für Rsync ausgewählt. Während der Verschlüsselung existieren das komprimierte Arbeitsarchiv und die verschlüsselte Ausgabe gleichzeitig. Deshalb wird vorübergehend ungefähr zusätzlicher Speicher in Größe des komprimierten Archivs benötigt. Bei einem regulären Fehler oder Abbruch wird der Arbeitsordner entfernt. Nach einem Stromausfall oder `SIGKILL` kann ein geschützter `.incomplete-*`-Arbeitsordner zurückbleiben und muss vor einer Weitergabe des Datenträgers geprüft werden.
 
-Auf dem Backup-Server:
+## Archivnamen und Begleitdateien
 
-```bash
-cd /opt/backup-manager
-bash create-backup.sh --check
-bash create-backup.sh --foreground -JOBNAME
-```
+Neue Archive heißen beispielsweise `2026-09-05-1-ApplicationData.zip.age`: Datum, fortlaufende ID, Jobname, Archivendung und die Verschlüsselungsendung `.age`. Das Datum entspricht dem lokalen Kalendertag beim Start des Laufs. Die ID beginnt pro Job und Tag bei `1`; weitere Backups erhalten `2`, `3` usw. Logdateien verwenden einen eigenen Tageszähler, beispielsweise `2026-09-05-1-backup.log`.
 
-Danach ein erzeugtes `.age`-Archiv auf den sicheren Rechner kopieren und dort entschlüsseln:
+Die Zähler liegen unter `state/names/` und bleiben bei Updates erhalten. Diesen Ordner nicht zurücksetzen: Bereits reservierte IDs werden auch nach einem Abbruch oder einer lokalen Löschung nicht erneut vergeben.
 
-```bash
-age --decrypt --identity le-backup-identity.txt \
-  --output test-backup.tar.zst 2026-09-05-1-Root-Server.tar.zst.age
-tar --zstd -tf test-backup.tar.zst
-```
+Zu jedem fertigen Archiv gehört eine `.meta.json`, beispielsweise `2026-09-05-1-ApplicationData.zip.age.meta.json`. Sie enthält Jobname, Archivname, ursprüngliches Archivformat, Verschlüsselungsverfahren, Größe, Abschlusszeit und SHA-256-Prüfsumme der verschlüsselten Datei, aber keine gesicherten Nutzdaten oder privaten Schlüssel. Das System verwendet sie zur Erkennung abgeschlossener Archive und zur Prüfung vor einer automatischen lokalen Löschung. Archiv und Begleitdatei zusammen aufbewahren. Vor dem Entpacken muss das Archiv mit dem privaten `age`-Schlüssel entschlüsselt werden.
 
-Für ein ZIP-Backup entsprechend `--output test-backup.zip` verwenden und mit `unzip -t test-backup.zip` prüfen. Erst wenn diese Probe erfolgreich war, den privaten Schlüssel endgültig offline verwahren oder einen alten Server kündigen.
+Bestehende unverschlüsselte Archive im vorherigen Format `ApplicationData_20260904T170223Z-22766.zip` werden nicht verändert. Die lokale Aufbewahrung erkennt sie weiterhin, Rsync wählt sie jedoch nicht mehr für einen neuen Upload aus. Damit überträgt das aktualisierte System keine unverschlüsselten Altarchive. Diese müssen bei Bedarf separat verschlüsselt oder nach geprüfter Ablösung entfernt werden.
 
-Der offizielle `age`-Aufruf verwendet `age-keygen -y`, um den öffentlichen Empfänger aus dem privaten Schlüssel abzuleiten, `age -R` für Empfängerdateien und `age --decrypt -i` zur Entschlüsselung. [Offizielle age-Dokumentation](https://github.com/FiloSottile/age)
+## Einstellungen
 
-## MariaDB über einen lokalen Socket
+`config/config.yml` enthält Grundeinstellungen, Jobs und deren Rsync-Ziele. `config/software.yml` enthält separat aktivierbare native Software; auch dort kann jeder Eintrag einen eigenen `rsync`-Abschnitt erhalten. Relative lokale Pfade beziehen sich immer auf den Ordner von `create-backup.sh`, nicht auf das aktuelle Terminalverzeichnis.
 
-Für eine nativ installierte MariaDB kann `secrets/mysql.cnf` ohne Host, Port und Passwort so aussehen:
+Jeder Job hat `name`, `type` und `enabled`. Die Archivmethode und `max_backups` werden aus `general_settings` übernommen, lassen sich aber pro Job überschreiben. Unterstützt werden `zip`, `tar`, `tar.gz`, `tar.bz2` und `tar.zst`.
+
+### Dateien
+
+`type: files` sichert eine Datei oder einen Ordner aus `source`. `exclude` enthält Archivmuster, beispielsweise `['application-data/logs/*']`; der äußerste Quellordner ist Teil des Archivpfads. Symlinks werden nicht als Aufforderung zum rekursiven Kopieren ihres Ziels behandelt.
+
+Dateien, die während der Sicherung geändert werden, können unterschiedliche Zeitstände haben. Anwendungen bleiben dennoch immer unangetastet. Meldet das Archivprogramm einen Fehler oder geänderte Dateien, wird der Job nicht als erfolgreich veröffentlicht.
+
+### MySQL und MariaDB
+
+`type: mysql` erstellt einen SQL-Dump mit Tabellen, Daten, Routinen, Triggern und Events. `databases: []` sichert alle Datenbanken; eine Liste beschränkt den Dump auf die angegebenen Datenbanken. Das Archiv enthält `data/databases.sql`, keine Kopie der Datenbankinstallation.
+
+`dump_command` ist `mysqldump` oder `mariadb-dump`. Für eine lokale bzw. über das Netzwerk erreichbare Datenbank bleibt `container` leer. Für eine Datenbank in Docker wird dort der Containername eingetragen; das Dump-Programm muss dann im Container verfügbar sein. Der laufende Container erhält vorübergehend eine private Zugangsdaten-Datei, die beim normalen Ende und bei behandelbaren Abbrüchen entfernt wird.
+
+Eine nativ installierte MariaDB kann ohne TCP über ihren lokalen Unix-Socket angesprochen werden. `secrets/mysql.cnf` darf dafür ohne Passwort so aussehen, sofern der MariaDB-Benutzer diese Anmeldung tatsächlich erlaubt:
 
 ```ini
 [client]
@@ -76,175 +208,165 @@ user="backup"
 protocol="socket"
 ```
 
-Diese Socket-Konfiguration ist optional. Eine bereits vorhandene Konfiguration mit Passwort funktioniert weiterhin und wird weder bei Installation, Aktualisierung noch bei einem Backup verändert. Das Backup-System entfernt keine Zugangsdaten aus Live-Dateien oder aus den gesicherten Quelldaten; solche Inhalte werden vollständig mitgesichert und durch `age` verschlüsselt.
+Das ist nur eine alternative Konfiguration. Eine vorhandene Passwort-Konfiguration bleibt weiterhin unterstützt und wird vom Backup-System niemals verändert, bereinigt oder überschrieben. Auch andere Quelldateien werden während eines Backups ausschließlich gelesen. Enthalten sie Zugangsdaten, bleiben diese im Backup vollständig erhalten und werden durch die Archivverschlüsselung geschützt.
 
-Wenn MariaDB nicht den automatisch gefundenen Standard-Socket verwendet, den tatsächlichen Pfad ergänzen:
+Ist nicht der Standard-Socket konfiguriert, kann zusätzlich `socket="/run/mysqld/mysqld.sock"` eingetragen werden. `protocol="socket"` wählt nur den Verbindungsweg; ob eine Anmeldung ohne Passwort zulässig ist, entscheidet die serverseitige Authentifizierung. Da das Backup-System als Betriebssystembenutzer root läuft, muss ein über das MariaDB-Plugin `unix_socket` angemeldetes Konto root ausdrücklich akzeptieren. Ein nur für den gleichnamigen Betriebssystembenutzer `backup` freigegebenes Konto würde den root-Prozess abweisen. [MariaDB-Dokumentation zu Unix-Socket-Authentifizierung](https://mariadb.com/docs/server/reference/plugins/authentication-plugins/authentication-plugin-unix-socket)
 
-```ini
-socket="/run/mysqld/mysqld.sock"
-```
+`consistency: single-transaction` ist der Standard: ein gemeinsamer Transaktionsstand für InnoDB ohne das Stoppen des Servers. Währenddessen keine Schemaänderungen wie `ALTER TABLE` durchführen. Nichttransaktionale Tabellen wie MyISAM haben diese Garantie nicht. Die optionale Einstellung `lock-all-tables` kann Schreibzugriffe blockieren und sollte nur bewusst eingesetzt werden. [MySQL-Dump-Dokumentation](https://dev.mysql.com/doc/refman/8.4/en/mysqldump.html)
 
-Im zugehörigen MySQL-Job bleibt `container` leer. Das Backup-System übergibt diese Datei als erste Option mit `--defaults-file`, sodass `mariadb-dump` die `[client]`-Werte direkt verwendet. `protocol="socket"` bestimmt nur den lokalen Verbindungsweg und ersetzt keine Datenbankberechtigung oder Authentifizierung.
+### Docker-Nutzdaten und Compose
 
-Das Backup läuft als Betriebssystembenutzer root. Nutzt der MariaDB-Benutzer das Authentifizierungs-Plugin `unix_socket`, muss seine serverseitige Zuordnung daher root akzeptieren. Eine Standardzuordnung zum gleichnamigen Betriebssystembenutzer `backup` funktioniert für diesen root-Prozess nicht. Die Verbindung vor dem ersten Backup mit der tatsächlichen Datei testen:
-
-```bash
-mariadb-dump --defaults-file=/opt/backup-manager/secrets/mysql.cnf \
-  --single-transaction --skip-lock-tables --no-data --all-databases >/dev/null
-```
-
-Der Datenbankbenutzer benötigt nur die für den Dump erforderlichen Lese- und Metadatenrechte. Wegen `--routines`, `--triggers` und `--events` kann reines `SELECT` allein je nach gesicherten Objekten nicht ausreichen. Das Backup-System vergibt oder erweitert keine Datenbankrechte. [MariaDB-Dokumentation zu mariadb-dump](https://mariadb.com/docs/server/clients-and-utilities/backup-restore-and-import-clients/mariadb-dump)
-
-## SSH-Anmeldung mit Passwort oder Schlüssel
-
-Es gibt zwei getrennte Dinge: Deine Anmeldung erfolgt wahlweise mit Benutzername und Passwort oder mit Benutzername und privatem SSH-Schlüssel. Die Server-Identität wird in beiden Fällen über `known_hosts` geprüft. Bei Passwortanmeldung ist kein eigener SSH-Schlüssel nötig; Schritt 1 kann übersprungen werden.
-
-Alle folgenden Befehle auf dem Backup-Server als root ausführen:
-
-```bash
-sudo -i
-cd /PFAD/ZUM/backup-manager
-umask 077
-```
-
-Dabei immer den Ordner der tatsächlich gestarteten Installation verwenden. Pfade verschiedener Installationskopien nicht miteinander vermischen.
-
-### 1. Eigenen SSH-Backup-Schlüssel hinterlegen
-
-Einen vorhandenen privaten Backup-Schlüssel als `secrets/backup_ed25519` hinterlegen. Alternativ einen neuen, ausschließlich dafür verwendeten Schlüssel erzeugen; eine vorhandene Datei dabei nicht überschreiben:
-
-```bash
-ssh-keygen -t ed25519 -f secrets/backup_ed25519 -C backup-manager
-chmod 600 secrets/backup_ed25519
-```
-
-Es entstehen zwei Dateien: `backup_ed25519` ist privat und bleibt hier. `backup_ed25519.pub` ist öffentlich und darf beim Storage-Anbieter bzw. im Konto des Remote-Backup-Benutzers unter `~/.ssh/authorized_keys` hinterlegt werden.
-
-Bei einem selbst verwalteten SSH-Server kann dafür nach der Hostschlüsselprüfung aus Schritt 3 `ssh-copy-id` verwendet werden. Bei Storage-Anbietern den vorgesehenen Schlüssel-Import benutzen. Den privaten Schlüssel niemals beim Anbieter hochladen.
-
-Ein Schlüssel mit Passphrase benötigt einen bereits erreichbaren SSH-Agenten; Cron stellt diesen nicht automatisch bereit. Für einen unbeaufsichtigten Lauf ohne Agent ist ein separater Schlüssel ohne Passphrase möglich. Dann sind die lokalen Dateirechte und eine auf Backup-Aufgaben beschränkte Remote-Berechtigung besonders wichtig. Rsync und die Remote-Aufbewahrung müssen dort weiterhin erlaubt sein.
-
-### 2. Verbindung eintragen
-
-`secrets/rsync.yml` bearbeiten; die folgenden Werte sind Beispiele und müssen ersetzt werden:
+`type: docker` liest die in `containers` angegebenen Container. `include_mounts: true` kopiert ihre persistenten Volumes und Bind-Mounts. `compose_files` enthält die zugehörigen Compose-Dateien, Overrides und gegebenenfalls `.env`-Dateien. Diese Pfade werden ausdrücklich konfiguriert, nicht geraten.
 
 ```yaml
-host: storage.example.org
-port: 22
-username: backup_user
-
-auth: key
-private_key: backup_ed25519
-known_hosts_file: known_hosts
-connect_timeout: 30
+- name: Webdaten
+  type: docker
+  enabled: true
+  containers:
+    - mein-webserver
+  compose_files:
+    - /docker/web/compose.yml
+    - /docker/web/.env
+  include_mounts: true
+  export_filesystem: false
+  save_images: false
 ```
 
-Dateipfade hier sind relativ zu `secrets/`. Die Datei `rsync.yml` wird über `rsync.credentials_file` in der Hauptconfig ausgewählt. Für eine andere Schlüsseldatei nur `private_key` ändern.
+Das Archiv enthält `data/compose/` und pro Container `data/container-N/inspect.json` sowie `mount-N`. Die Zuordnung der Compose-Dateien steht in `compose/paths.tsv`, die Mountreihenfolge entspricht den persistenten Mounts in `inspect.json`.
 
-Für Passwortanmeldung sieht derselbe Abschnitt beispielsweise so aus:
+Images und das Container-Dateisystem sind standardmäßig nicht enthalten. Sie können bei Bedarf ausdrücklich zugeschaltet werden. Ein Container-Export allein enthält keine Volume-Daten. [Docker-Export-Dokumentation](https://docs.docker.com/reference/cli/docker/container/export/)
+
+Laufende Datenbankverzeichnisse nicht über diesen Dateikopierweg sichern: Für MySQL/MariaDB einen `mysql`-Job mit `container` verwenden. Der verbreitete Datenpfad `/var/lib/mysql` wird im Docker-Dateimodul ausdrücklich abgewiesen; beliebige abweichende Datenbankpfade können nicht automatisch erkannt werden. Andere laufend geänderte Anwendungsdateien bleiben Live-Kopien ohne garantierten gemeinsamen Zeitpunkt. `tmpfs` wird nicht gesichert.
+
+Compose-Dateien, `.env`, SQL-Dumps und Docker-Metadaten können Passwörter enthalten. Deshalb gelten auch Backups als vertraulich.
+
+### Native Server-Software
+
+In `config/software.yml` stehen einzeln aktivierbare Pakete für native Server-Software, unter anderem Nginx, Apache, Fail2Ban und WireGuard. `paths` enthält notwendige Dateien/Ordner, `optional_paths` distributionsabhängige Ergänzungen. Fehlt ein notwendiger Pfad, schlägt die Vorprüfung fehl. Fehlen alle optionalen Pfade eines sonst leeren Jobs, wird kein leeres Backup als Erfolg ausgegeben.
+
+Die Paketliste ist keine Installationsvoraussetzung: Nur tatsächlich verwendete Pakete aktivieren und Pfade auf dem eigenen Server prüfen. Datenbanken und andere Daten außerhalb der Config-Pfade sind nicht automatisch enthalten. Nicht benötigte Einträge können entfernt werden.
+
+```bash
+bash create-backup.sh -Nginx -Fail2Ban -WireGuard
+bash create-backup.sh --type software
+```
+
+Nginx-VHosts liegen normalerweise innerhalb der gesicherten Nginx-Konfiguration. Extern eingebundene Dateien, Zertifikate und Webinhalte müssen bei Bedarf ergänzt werden. Symlink-Ziele außerhalb der gesicherten Pfade werden nicht automatisch kopiert. Das Archiv enthält die gewählten Pfade unter `data/files/`, beispielsweise `data/files/etc/nginx/`.
+
+### Vollständiges Root-Server-Backup
+
+Der Sonderjob wird ausschließlich über `--full-server` gestartet. Bei normalen Komplettläufen ist er nicht enthalten:
+
+```bash
+# Im konfigurierten tmux oder screen starten
+bash create-backup.sh --full-server
+
+# Direkt im aktuellen Terminal starten
+bash create-backup.sh --foreground --full-server
+
+# Nur vorhandene Root-Server-Archive übertragen
+bash create-backup.sh --foreground --rsync-only --full-server
+```
+
+Das Archiv heißt beispielsweise `2026-09-05-1-Root-Server.tar.zst.age`. Die Archivart vor der Verschlüsselung ist fest auf `tar.zst` gesetzt. Zstandard läuft unveränderbar mit Ultra-Kompressionsstufe 22. Dies bietet die stärkste Zstd-Kompression, benötigt aber viel CPU, Arbeitsspeicher und Zeit. In der Config kann keine andere Archivart oder Kompressionsstufe eingetragen werden.
+
+Fest ausgeschlossen sind `/opt`, `/root` und `/mnt`. Zusätzlich werden `/proc`, `/sys`, `/dev` und `/run` ausgelassen, da diese virtuellen Linux-Dateisysteme keine normalen Sicherungsdaten enthalten. Die Ausschlüsse sind nicht konfigurierbar. Andere Bereiche des Root-Dateisystems, darunter `/etc`, `/home`, `/srv`, `/usr` und `/var`, werden aufgenommen.
+
+Das Backup liest den laufenden Server und beendet, pausiert oder startet keine Anwendung neu. Dateien können sich während der langen Sicherung verändern. Datenbanken sollten deshalb weiterhin über die vorgesehenen Dump-Jobs gesichert werden; ein enthaltenes laufendes Datenbankverzeichnis ersetzt keinen SQL-Dump.
+
+Nur Aufbewahrung und Rsync-Ziel sind einstellbar:
 
 ```yaml
-host: storage.example.org
-port: 22
-username: backup_user
-
-auth: password
-password_file: rsync-password
-known_hosts_file: known_hosts
-connect_timeout: 30
+full_server_backup:
+  max_backups: 2
+  rsync:
+    enabled: true
+    destination: Server/Root-Server
+    keep_backups: 3
+    delete_local_after_transfer: false
 ```
 
-Die Passwortdatei enthält nur die Passwortzeile und hat Rechte `600`; zusätzlich wird `sshpass` benötigt. `private_key` wird bei `auth: password` nicht verwendet und kann entfallen. Um auf Schlüsselanmeldung zu wechseln, `auth: key` und `private_key` wie im ersten Beispiel setzen. `password_file` wird dann nicht verwendet. Host, Port und Benutzername bleiben gleich. Keine Passwörter in Shell-Befehle, Cronzeilen oder die normale Config schreiben.
+## Rsync und Aufbewahrung
 
-### 3. Was ist known_hosts?
+Die Rsync-Einstellungen stehen direkt unter dem jeweiligen Job. Es gibt keinen `mode` und keinen zweiten lokalen Quellpfad. Der Quellordner wird aus `general_settings.backup_directory` und dem Jobnamen ermittelt. Nur abgeschlossene, mit `age` verschlüsselte Archive und die zugehörige `.meta.json` werden übertragen; keine Rohdaten, unverschlüsselten Altarchive oder Zeitstempelordner.
 
-`known_hosts` identifiziert den **SSH-Server**, nicht deinen Benutzer. Der private Schlüssel meldet dich beim Server an; der öffentliche Hostschlüssel in `known_hosts` schützt davor, dich mit einem fremden Server zu verbinden.
-
-Bei Passwortanmeldung übernimmt das Passwort deine Anmeldung. Der Server besitzt dennoch einen eigenen Hostschlüssel für die SSH-Verbindung. Diesen muss man weder selbst erstellen noch beim Storage-Anbieter hochladen.
-
-Eine Zeile enthält Hostname/IP, Schlüsseltyp und öffentlichen Serverschlüssel. Bei abweichendem Port lautet der Hostteil beispielsweise `[storage.example.org]:2222`. Ein Eintrag beginnend mit `|1|` enthält einen gehashten Hostnamen. Mehrere Einträge können zu verschiedenen Servern, Ports oder Schlüsseltypen gehören. Diese Adressen sind keine zusätzlichen Rsync-Ziele. Das einzige Verbindungsziel ergibt sich aus `host` und `port` in `rsync.yml`.
-
-Für das Backup werden nur die verifizierten Hostschlüssel des tatsächlich verwendeten Storage-Servers benötigt. Nicht zugehörige Einträge können nach Prüfung entfernt werden; die Software übernimmt keine globale Hostdatei automatisch.
-
-Die sichere Einrichtung übernimmt das Backup-System selbst. Host, Port und die richtige `known_hosts`-Datei werden automatisch aus der aktuellen Installation gelesen:
-
-```bash
-bash create-backup.sh --setup-ssh-host
+```yaml
+- name: ApplicationData
+  type: files
+  enabled: true
+  source: /srv/example/application-data
+  exclude: []
+  max_backups: 10
+  rsync:
+    enabled: true
+    destination: Examples/ApplicationData
+    keep_backups: 60
+    delete_local_after_transfer: false
 ```
 
-Der Befehl legt die Datei bei Bedarf mit geschützten Rechten an, zeigt den empfangenen Fingerabdruck und wartet auf die Eingabe `JA`. Den Fingerabdruck vorher über das Anbieterpanel oder die offizielle Dokumentation vergleichen. Ein bereits gespeicherter, abweichender Hostschlüssel wird niemals automatisch ersetzt.
+`rsync.enabled: false` schaltet nur die Übertragung ab, nicht das lokale Backup. Fehlt der ganze Abschnitt, ist Rsync für diesen Job aus. `destination` ist ein eigener Ordner auf dem Storage-Server; relative Pfade beziehen sich auf das dortige SSH-Startverzeichnis. `keep_backups` zählt Remote-Archive, `max_backups` lokale Archive. `bash create-backup.sh -ApplicationData` erstellt und überträgt nur diesen Beispieljob. `--rsync-only -ApplicationData` überträgt vorhandene fertige Archive, ohne ein neues Backup zu erstellen.
 
-Die folgenden manuellen Schritte sind nur notwendig, wenn der Einrichtungsbefehl nicht verwendet werden soll.
-
-Hostschlüssel zunächst in eine separate Datei einlesen, die aktuelle Vertrauensdatei dabei nicht überschreiben:
-
-```bash
-ssh-keyscan -p 22 -t ed25519 storage.example.org > secrets/known_hosts.pending
-ssh-keygen -lf secrets/known_hosts.pending
-```
-
-Den angezeigten Fingerabdruck über einen unabhängigen, vertrauenswürdigen Kanal vergleichen, etwa das Anbieterpanel oder die Serverkonsole. `ssh-keyscan` allein bestätigt keine Identität. Nur wenn der Fingerabdruck stimmt und die Datei nicht leer ist, den geprüften Eintrag in `secrets/known_hosts` übernehmen. Existiert die Datei bereits, nur den passenden Servereintrag ergänzen oder gezielt ersetzen; nicht andere benötigte Einträge blind überschreiben. [OpenSSH zu ssh-keyscan](https://man.openbsd.org/ssh-keyscan)
-
-Danach die Rechte setzen:
-
-```bash
-bash install.sh permissions --target "$(pwd -P)"
-```
-
-Optional auf einem selbst verwalteten SSH-Server den öffentlichen Benutzerschlüssel installieren:
-
-```bash
-ssh-copy-id -i secrets/backup_ed25519.pub -p 22 \
-  -o StrictHostKeyChecking=yes \
-  -o "UserKnownHostsFile=$(pwd -P)/secrets/known_hosts" \
-  backup_user@storage.example.org
-```
-
-Bei einer Warnung vor einem geänderten Hostschlüssel nicht einfach die Prüfung deaktivieren: Den neuen Fingerabdruck zuerst unabhängig bestätigen.
-
-#### Fehler: Host key verification failed
-
-`No ED25519 host key is known for [HOST]:PORT` bedeutet, dass für genau diesen Host und Port kein passender bestätigter Serverschlüssel vorliegt. Die Verbindung bricht vor der Passwort- oder Schlüsselanmeldung ab. Ein Eintrag für Port 22 oder für einen anderen Host deckt einen abweichenden Host oder Port nicht automatisch ab.
-
-Das System verwendet ausschließlich die unter `known_hosts_file` angegebene Datei unter `secrets/`, nicht automatisch `/root/.ssh/known_hosts`. Ein älteres Script mit `StrictHostKeyChecking=accept-new` kann zuvor unbekannte Hosts automatisch übernommen haben. Hier gilt `StrictHostKeyChecking=yes`: Neue Einträge müssen zuerst geprüft werden. Das ist unabhängig von `auth: password` oder `auth: key`. [OpenSSH zu StrictHostKeyChecking](https://man.openbsd.org/ssh_config#StrictHostKeyChecking)
-
-Zur Korrektur den Einrichtungsbefehl innerhalb der verwendeten Installation ausführen:
-
-```bash
-bash create-backup.sh --setup-ssh-host
-```
-
-Bei einem Storage-Anbieter mit abweichendem SSH-Port die oben gezeigte Hostschlüsselabfrage mit dem tatsächlich konfigurierten Port und Hostnamen ausführen. Den Fingerabdruck mit den Angaben des Anbieters oder über einen anderen vertrauenswürdigen Kanal vergleichen. Erst danach den bestätigten Eintrag übernehmen. Keine Prüfung auf `no` setzen und keine fremden oder geänderten Einträge ungeprüft akzeptieren.
-
-### 4. Job und Übertragung testen
-
-In `config/config.yml` beim gewünschten Job:
+Gemeinsame Verbindungseinstellungen stehen einmal oben in `config/config.yml`:
 
 ```yaml
 rsync:
-  enabled: true
-  destination: Examples/ApplicationData
-  keep_backups: 60
-  delete_local_after_transfer: false
+  credentials_file: rsync.yml
+  dry_run: false
+  timeout_seconds: 300
 ```
 
-Dann als root:
+`credentials_file` ist relativ zu `secrets/`. Die [Anleitung für Passwort, SSH-Schlüssel und Hostprüfung](secrets/Readme.md) beschreibt die Einrichtung. `dry_run: true` simuliert nur Rsync: keine Remote-Ordner werden angelegt und keine Archive gelöscht. Der normale lokale Backup-Schritt ist davon unabhängig. Für einen aussagekräftigen Rsync-Testlauf muss der Remote-Zielordner bereits existieren.
+
+Nach jedem echten Upload vergleicht ein zweiter Rsync-Testlauf die lokalen und entfernten Dateien mit `--checksum`. Erst ohne Unterschiede beginnt die Remote-Aufbewahrungsbereinigung. Bereits vorhandene Remote-Dateien werden beim Upload mit `--ignore-existing` nicht überschrieben. Enthält das Ziel unter demselben Namen andere Daten, schlägt der anschließende Vergleich fehl; lokale Archive bleiben erhalten und es erfolgt keine Remote-Bereinigung. Der Vergleich liest die Dateiinhalte und kann bei großen Archiven entsprechend dauern. [Rsync-Dokumentation](https://download.samba.org/pub/rsync/rsync.1)
+
+### Backup nur auf dem Storage-Server behalten
+
+Beim gewünschten Job `delete_local_after_transfer: true` setzen und ihn wie gewohnt mit `bash create-backup.sh -JOBNAME` starten. Das Archiv wird zunächst lokal erstellt; entsprechender Arbeits- und Archivspeicher wird weiterhin benötigt.
+
+Zusätzlich zum Remote-Vergleich müssen die lokalen Archive vor der Übertragung und unmittelbar vor der Löschung zu ihren SHA-256-Metadaten passen. Erst nach erfolgreichem Upload, Inhaltsvergleich und Remote-Aufbewahrungsbereinigung werden exakt die übertragenen lokalen Archive samt Metadaten gelöscht. Bei Upload-, Prüf- oder Remote-Bereinigungsfehlern bleiben sie erhalten. `dry_run` löscht niemals lokale Archive.
+
+Diese Einstellung ist standardmäßig aus. Sie löscht keine Quelldaten, fremden Dateien oder älteren, in diesem Lauf nicht übertragenen lokalen Archive. Zurückgebliebene Archive können mit `--rsync-only -JOBNAME` erneut übertragen und geprüft werden. Pro Lauf werden höchstens die neuesten `keep_backups` Archive ausgewählt. Eine einzige Remote-Kopie ersetzt keine zusätzliche unabhängige Sicherung.
+
+Aufbewahrung löscht nur passende Backup-Dateinamen desselben Jobs im aktuellen oder vorherigen UTC-Laufkennungsformat. Lokal wird zusätzlich eine passende `.meta.json` verlangt; ältere Archive ohne diesen Nachweis bleiben bestehen. Bei Backup-/Übertragungsfehlern unterbleibt die lokale Aufbewahrungsbereinigung. Unvollständige Arbeitsdateien werden bei behandelbaren Abbrüchen entfernt; nach Stromausfall oder `SIGKILL` können private `.incomplete-*`-Ordner zurückbleiben. Im aktuellen Lauf übertragene Remote-Archive sind von der Bereinigung ausgenommen; bei ungewöhnlichen Zeitstempeln können daher vorübergehend mehr als `keep_backups` Archive vorhanden sein.
+
+Backup-Ziele sollten leer bzw. ausschließlich für diese Sicherungen vorgesehen sein. Für Rsync-Transport sind SSH-Schlüssel und Passwortdateien möglich; Hostschlüssel werden strikt geprüft. Details stehen in `secrets/Readme.md`.
+
+Den SSH-Hostschlüssel einmalig direkt aus der verwendeten Installation einrichten:
 
 ```bash
-bash create-backup.sh --check -ApplicationData
-bash create-backup.sh --wait -ApplicationData
+bash create-backup.sh --setup-ssh-host
 ```
 
-Der zweite Befehl erstellt ein echtes Backup und überträgt es. `--check` prüft nur lokal. Für eine reine Übertragung bereits fertiger Archive:
+Der Befehl verwendet automatisch deren `config/config.yml` und `secrets/rsync.yml`. Dadurch muss kein Installationspfad in einen langen SSH-Befehl kopiert werden.
+
+### Storage-Ziele mit eingeschränkter SSH-Shell
+
+Die Remote-Verwaltung sendet `mkdir`, `chmod`, `ls` und `rm` als einzelne SSH-Befehle. Eine vollständige Shell, `umask` oder Befehlsverkettungen auf dem Zielserver sind dafür nicht erforderlich. Damit eignet sich die Übertragung auch für viele Storage-Angebote mit eingeschränktem SSH-Zugang.
+
+Neue Zielordner werden mit `mkdir -p -m 700` angelegt. Anschließend setzt ein separater `chmod 700` die Rechte des Zielordners auch dann, wenn er bereits existiert. Erst nach beiden erfolgreichen Schritten beginnt der Upload. Bei Fehlern bleiben die lokalen Archive erhalten. Übergeordnete, bereits vorhandene Remote-Ordner werden nicht umberechtigt. Die Anmeldung kann weiterhin mit Passwort oder SSH-Schlüssel erfolgen.
+
+## Aufbau und Prüfung
+
+```text
+create-backup.sh          Einstieg, Hilfe und Laufsperre
+install.sh               Nur im Quellordner: Installation und Aktualisierung
+code/shell/manager.sh    Backup-Reihenfolge, Multiplexer, Ergebnis und Protokolle
+code/shell/core/         Config-Zugriff, Vorprüfung, SSH und Aufbewahrung
+code/shell/modules/      Dateien, SQL-Dumps, Docker und Rsync
+code/installer/          Nur im Quellordner: Installation, Update und Entfernung
+code/python/core/       Sicheres Lesen/Prüfen von YAML und JSON
+code/python/integrations/ Docker-JSON und SSH-Zugangsdaten prüfen
+config/                 Einstellbare Jobs und Transferziele
+secrets/                Login-Dateien und SSH-Schlüssel
+tests/                  Isolierte Funktions- und Sicherheitstests
+```
 
 ```bash
-bash create-backup.sh --wait --rsync-only -ApplicationData
+bash tests/verify.sh
 ```
 
-Für einen Übertragungstest ohne Upload oben in der Hauptconfig `rsync.dry_run: true` setzen. Der Remote-Zielordner muss dafür bereits existieren. Der lokale Backup-Schritt läuft trotzdem, lokale Archive werden im Testlauf nicht entfernt.
+Die Tests erstellen echte lokale Archive und prüfen Shell-Syntax, Konfigurationsfehler, Jobauswahl, Sperren, Aufbewahrung und Installer. Docker, Datenbank-Clients und SSH/Rsync werden dabei durch Testprogramme ersetzt; produktive Systeme werden nicht kontaktiert. Dieses Shell-Projekt besitzt keinen Maven-Build.
 
-`delete_local_after_transfer: true` entfernt die erfolgreich übertragenen lokalen Archive nach zusätzlichem Inhaltsvergleich; bei Fehlern bleiben sie erhalten. Diese Einstellung nur aktivieren, wenn ausdrücklich keine lokale Kopie gewünscht ist.
+Python ist auf drei Laufzeitdateien begrenzt: YAML-/JSON-Zugriff, SSH-Config-Prüfung und Docker-JSON-Prüfung. Ablaufsteuerung, Sicherungen, Installation und Übertragungen sind Shell. Leere `__init__.py` sind für diese Python-Namensraumpakete nicht erforderlich. Geschützte Original-Configs unter `secrets/migration-*` sind Benutzerdaten, kein Laufzeitcode, und werden nicht automatisch entfernt.
 
-## Geschützte Altdateien
-
-`migration-*` enthält Original-Configs einer früheren Umstellung und möglicherweise alte Zugangsdaten. Diese Benutzerdaten nicht veröffentlichen und nur nach eigener Prüfung entfernen.
+Die installierte Kopie enthält keinen Installer. Installation und Aktualisierung werden immer aus dem Quellordner gestartet. Der zuletzt erfolgreich verwendete Installationspfad wird geschützt unter `/var/lib/le-backup-manager/installation-target` gespeichert.

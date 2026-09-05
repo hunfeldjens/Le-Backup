@@ -1,14 +1,50 @@
-# Installation
+# Installation und Betrieb
 
-Das Backup läuft ausschließlich als root auf Linux. Der Installer legt keine Benutzer, Dienste oder Cronjobs an und installiert keine Pakete ungefragt. Sämtliche Pfade, Jobnamen und Zeitpläne in dieser Anleitung sind neutrale Beispiele und müssen vor dem Einsatz geprüft und angepasst werden.
+[← Zurück zur Hauptdokumentation](Readme.md)
 
-## Voraussetzungen prüfen
+> Schritt-für-Schritt-Anleitung für Installation, Prüfung, Zeitplanung, Aktualisierung und Entfernung von Le-Backup Manager.
+
+Le-Backup Manager läuft ausschließlich als root auf Linux. Der Installer legt keine Benutzer, Dienste oder Cronjobs an und installiert keine Pakete ungefragt.
+
+> [!IMPORTANT]
+> Sämtliche Pfade, Jobnamen und Zeitpläne in dieser Anleitung sind neutrale Beispiele. Vor dem ersten produktiven Lauf müssen Config, Quellen, Empfänger und Remote-Ziele vollständig geprüft werden.
+
+## Inhalt
+
+- [Voraussetzungen](#voraussetzungen)
+- [Installation einrichten](#installation-einrichten)
+- [tmux oder screen](#tmux-oder-screen)
+- [Root-Crontab](#root-crontab)
+- [Aktualisieren](#aktualisieren)
+- [Entfernen](#entfernen)
+- [Wiederherstellen](#wiederherstellen)
+
+## Voraussetzungen
+
+### Automatisch prüfen
 
 ```bash
 sudo bash install.sh check
 ```
 
-Die Prüfung nennt fehlende Programme samt Paketnamen und einem Installationsbeispiel für Debian/Ubuntu. Benötigt werden Bash, Python ab 3.9 mit PyYAML, `flock` (util-linux), der gewählte Multiplexer sowie die Programme der aktiven Jobs:
+Die Prüfung verändert das System nicht. Sie nennt fehlende Programme samt Paketnamen und einem Installationsbeispiel für Debian/Ubuntu.
+
+### Benötigte Komponenten
+
+| Komponente | Wann benötigt |
+| --- | --- |
+| Bash | Immer |
+| Python ab 3.9 und PyYAML | Immer, zum sicheren Lesen der Konfiguration |
+| `flock` aus util-linux | Immer, für die Laufsperre |
+| `age` | Immer, für die verpflichtende Archivverschlüsselung |
+| tmux oder screen | Für Hintergrundläufe und `--wait` |
+| Archivprogramme | Abhängig von `zip`, `tar`, `gzip`, `bzip2` oder `zstd` |
+| MariaDB-/MySQL-Client | Für native Datenbank-Dumps |
+| Docker-CLI | Für Docker-Jobs und Container-Dumps |
+| Rsync und OpenSSH | Für Remote-Übertragungen |
+| `sshpass` | Nur bei SSH-Passwortanmeldung |
+
+Im Detail gelten folgende Abhängigkeiten:
 
 - `tmux` oder `screen` ab Version 4.2.
 - `tar`, `gzip` und `sha256sum` bzw. `shasum`.
@@ -21,20 +57,39 @@ Die Prüfung nennt fehlende Programme samt Paketnamen und einem Installationsbei
 
 Auf dem Storage-Server werden Rsync und SSH sowie `mkdir`, `chmod`, `ls` und `rm` benötigt. Die lokale Paketprüfung prüft keine Remote-Programme. Bei fehlendem Python/PyYAML zuerst diese Grundlage installieren und die Prüfung wiederholen; erst danach kann die YAML-Config ausgewertet werden.
 
-## Installieren und konfigurieren
+## Installation einrichten
+
+### 1. Vorlagen konfigurieren
 
 Vor der Installation die Job-Pfade in `config/config.yml` und die benötigten Einträge in `config/software.yml` einstellen. Der öffentliche `age`-Empfängerschlüssel, SQL- und SSH-Dateien liegen unter `secrets/`; die Schritt-für-Schritt-Anleitung für Verschlüsselungs- und SSH-Schlüssel steht in [secrets/Readme.md](secrets/Readme.md).
 
-`Readme.md` und `installation.md` sind optional. Installation, Update und Rechtekorrektur funktionieren ohne beide Dateien. Vorhandene Dokumentation wird mitkopiert; fehlt sie im Update, bleibt bereits installierte Dokumentation erhalten.
+`Readme.md` und `installation.md` sind optionale Dokumentationsdateien. Installation, Update und Rechtekorrektur funktionieren ohne beide Dateien. Vorhandene Dokumentation wird mitkopiert; fehlt sie im Update, bleibt bereits installierte Dokumentation erhalten.
 
 Der Quellordner und die Installation haben unterschiedliche Aufgaben. Im Quellordner bleiben `install.sh`, `code/installer/` und der jeweils neue Programmstand. In die Installation werden nur `create-backup.sh`, der benötigte Shell-/Python-Laufzeitcode, Config, Secrets und optionale Dokumentation übernommen. Reine Installerdateien werden dort nicht abgelegt; ein Update entfernt sie auch aus älteren Installationen.
 
+### 2. Installieren
+
 ```bash
 sudo bash install.sh install --target /opt/backup-manager
+```
+
+### 3. Erste Prüfung durchführen
+
+```bash
 sudo -i
 cd /opt/backup-manager
 bash create-backup.sh --check
+```
+
+Wenn mindestens ein Rsync-Ziel aktiviert wurde, anschließend den SSH-Hostschlüssel unabhängig verifizieren und speichern:
+
+```bash
 bash create-backup.sh --setup-ssh-host
+```
+
+### 4. Erstes Backup starten
+
+```bash
 bash create-backup.sh --wait
 ```
 
@@ -45,6 +100,8 @@ Der Installer setzt root als Besitzer: Installationsordner, Unterordner und Shel
 Normale Benutzer können diese Dateien damit nicht lesen, ändern oder kopieren. Root, sudo-Berechtigte und Prozesse mit vergleichbaren Rechten können nicht ausgesperrt werden. Dateirechte entfernen außerdem keine früher angefertigten Kopien. Das System und seine Archive nicht in öffentlich ausgelieferten Webordnern ablegen.
 
 Externe Quelldaten werden nicht verändert. Backup-, Status- und Logordner werden privat angelegt. Bereits vorhandene Ausgabeordner müssen root gehören.
+
+### Installation ohne Kopieren verwenden
 
 Direkter Betrieb aus einem eigenen Ordner ist ebenfalls möglich. Die Rechte dieses Ordners ausdrücklich korrigieren:
 

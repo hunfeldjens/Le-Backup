@@ -1,8 +1,50 @@
-# Verschlüsselung und Zugangsdaten
+# Secrets sicher einrichten
 
-Dieser Ordner gehört root. Unterordner erhalten `700`, Dateien `600`; normale Benutzer haben damit keinen Zugriff. Root, sudo-Berechtigte und vergleichbar privilegierte Prozesse können durch diese Rechte nicht ausgesperrt werden. Auch fertige Archive können Passwörter enthalten und müssen privat bleiben. Sämtliche Namen, Hosts, Ports und Pfade in dieser Anleitung sind neutrale Beispiele und dürfen nicht als produktive Zugangsdaten übernommen werden.
+[← Zurück zur Hauptdokumentation](../Readme.md)
 
-`age-recipients.txt` enthält ausschließlich öffentliche Empfängerschlüssel für die Backup-Verschlüsselung. `mysql.cnf` enthält die SQL-Anmeldung. `rsync.yml` enthält den Storage-Host und die SSH-Anmeldung. Private SSH-Schlüssel, Passwortdateien und `known_hosts` liegen ebenfalls hier. Echte Secrets sind über Git-Ignore ausgeschlossen; bereits früher erfasste Dateien werden dadurch nicht nachträglich aus Git entfernt.
+Diese Anleitung beschreibt die Verschlüsselungs-, Datenbank- und SSH-Dateien, die Le-Backup Manager für verschlüsselte Backups und optionale Rsync-Übertragungen benötigt.
+
+> [!WARNING]
+> Echte Passwörter, private Schlüssel und produktive Hosts dürfen niemals in Git eingecheckt werden. Im Repository gehören ausschließlich die mitgelieferten `.example`-Dateien.
+
+> [!IMPORTANT]
+> Der Ordner `secrets/` gehört root. Unterordner erhalten Modus `700`, Dateien Modus `600`. Root, sudo-Berechtigte und vergleichbar privilegierte Prozesse können durch Dateirechte nicht ausgesperrt werden. Auch verschlüsselte Archive können sensible Metadaten oder gesicherte Zugangsdaten enthalten und müssen privat behandelt werden.
+
+## Inhalt
+
+- [Dateien im Überblick](#dateien-im-überblick)
+- [Empfohlene Reihenfolge](#empfohlene-reihenfolge)
+- [Backup-Schlüssel für age](#backup-schlüssel-für-age)
+- [MariaDB über einen lokalen Socket](#mariadb-über-einen-lokalen-socket)
+- [SSH-Anmeldung mit Passwort oder Schlüssel](#ssh-anmeldung-mit-passwort-oder-schlüssel)
+- [Fehler: Host key verification failed](#fehler-host-key-verification-failed)
+- [Job und Übertragung testen](#4-job-und-übertragung-testen)
+
+## Dateien im Überblick
+
+| Datei | Zweck | Veröffentlichen? |
+| --- | --- | --- |
+| `age-recipients.txt` | Öffentliche Empfänger für die Archivverschlüsselung | Nur bewusst; Änderungen müssen geschützt werden |
+| `mysql.cnf` | Anmeldung für `mysqldump` oder `mariadb-dump` | Nein |
+| `rsync.yml` | Host, Port, Benutzer und Authentifizierungsart des Storage-Ziels | Nein |
+| `backup_ed25519` | Privater SSH-Schlüssel für die Übertragung | Niemals |
+| `rsync-password` | Passwort für optionale SSH-Passwortanmeldung | Niemals |
+| `known_hosts` | Verifizierte öffentliche Hostschlüssel des Storage-Servers | Nicht geheim, aber vor Manipulation schützen |
+| `*.example` | Neutrale Konfigurationsvorlagen | Ja |
+
+## Empfohlene Reihenfolge
+
+1. Das `age`-Schlüsselpaar auf einem sicheren, getrennten Rechner erzeugen.
+2. Nur `age-recipients.txt` auf dem Backup-Server hinterlegen.
+3. Datenbankzugang über `mysql.cnf` konfigurieren und separat testen.
+4. Rsync-Zugang über `rsync.yml` sowie Schlüssel oder Passwortdatei konfigurieren.
+5. Den SSH-Hostschlüssel unabhängig prüfen und mit `--setup-ssh-host` speichern.
+6. `bash create-backup.sh --check` ausführen.
+7. Ein Testbackup erstellen, übertragen und auf einem getrennten System entschlüsseln.
+
+Sämtliche Namen, Hosts, Ports und Pfade in dieser Anleitung sind neutrale Beispiele und dürfen nicht unverändert als produktive Zugangsdaten übernommen werden.
+
+Echte Secrets sind über Git-Ignore ausgeschlossen; bereits früher erfasste Dateien werden dadurch nicht nachträglich aus dem Git-Index oder aus der Versionshistorie entfernt.
 
 ## Backup-Schlüssel für age
 
